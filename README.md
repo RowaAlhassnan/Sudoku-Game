@@ -165,3 +165,15 @@ per generated puzzle.
 <div align="center">
 <sub>Any current browser. CSS custom properties, <code>clamp()</code>, flexbox and grid, <code>fetch</code> for the online coach. JavaScript required.</sub>
 </div>
+
+---
+
+<div align="center">
+
+### SDAIA Academy
+
+Built at **SDAIA Academy**.
+
+<img src="https://img.shields.io/badge/SDAIA-Academy-00A19A?style=for-the-badge&labelColor=2A1B4A" alt="SDAIA Academy">
+
+</div>
