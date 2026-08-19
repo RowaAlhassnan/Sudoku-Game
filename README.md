@@ -172,6 +172,5 @@ per generated puzzle.
 
 ### SDAIA Academy
 
-Built at **SDAIA Academy**.
-@SDAIAAcademy
+Built at **@SDAIAAcademy**
 </div>
