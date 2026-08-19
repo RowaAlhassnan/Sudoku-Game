@@ -173,7 +173,5 @@ per generated puzzle.
 ### SDAIA Academy
 
 Built at **SDAIA Academy**.
-
-<img src="https://img.shields.io/badge/SDAIA-Academy-00A19A?style=for-the-badge&labelColor=2A1B4A" alt="SDAIA Academy">
-
+@SDAIAAcademy
 </div>
