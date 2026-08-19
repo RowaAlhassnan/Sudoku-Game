@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="description" content="A colorful browser Sudoku with pencil marks, conflict highlighting, undo/redo, a timer and local statistics.">
+<title>Sudoku</title>
+<style>
+/* ============================================================
+   DESIGN TOKENS
+   Concept: every digit owns a hue. Clues stay in ink, so the
+   board starts near-monochrome and colors itself in as you
+   solve it. Pencil marks, keypad and highlights all inherit
+   the digit's color, which makes the palette functional
+   rather than ornamental.
+   ============================================================ */
+:root{
+  /* the nine digit hues, spread around the wheel */
+  --c1:#E8384F;  /* 1  raspberry */
+  --c2:#F5821F;  /* 2  tangerine */
+  --c3:#B8930A;  /* 3  gold      */
+  --c4:#3FA34D;  /* 4  grass     */
+  --c5:#00A19A;  /* 5  teal      */
+  --c6:#1487D8;  /* 6  sky       */
+  --c7:#3F5BD9;  /* 7  indigo    */
+  --c8:#8A45D9;  /* 8  grape     */
+  --c9:#D93BA0;  /* 9  magenta   */
+
+  /* soft tints of the same nine, for cell fills */
+  --t1:#FBDDE1; --t2:#FDE7D2; --t3:#F4EBCB; --t4:#D9EEDC; --t5:#CCECEB;
+  --t6:#D0E7F7; --t7:#D9DEF7; --t8:#E8DAF7; --t9:#F7D8EE;
+
+  --bg:#EFE9FB;
+  --dot:#DCD0F5;
+  --card:#FFFFFF;
+  --ink:#2A1B4A;
+  --muted:#7B6BA3;
+  --rule:#DED6F0;
+  --peer:#F2EDFC;
+  --danger:#E8384F;
+  --danger-soft:#FFDCE2;
+
+  /* recolored live by JS to the digit you are working with */
+  --active:var(--ink);
+  --active-soft:var(--peer);
+
+  --font-display:"Trebuchet MS","Segoe UI",system-ui,-apple-system,Helvetica,sans-serif;
+  --font-ui:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-data:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+
+  --radius:14px;
+  --lift:0 4px 0;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+
+body{
+  background:var(--bg);
+  /* polka dots, drawn in CSS so nothing is fetched */
+  background-image:radial-gradient(var(--dot) 1.6px,transparent 1.7px);
+  background-size:22px 22px;
+  color:var(--ink);
+  font-family:var(--font-ui);
+  font-size:16px;line-height:1.45;
+  -webkit-text-size-adjust:100%;
+  padding:clamp(12px,3vw,30px);
+}
+
+button{font:inherit;color:inherit;margin:0}
+:focus-visible{outline:3px solid var(--c8);outline-offset:3px}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+.app{max-width:960px;margin:0 auto}
+
+/* ---------- Masthead ---------- */
+.masthead{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;margin-bottom:20px}
+.masthead__brand{margin-right:auto}
+.masthead__eyebrow{
+  font-family:var(--font-data);font-size:.64rem;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 1px
+}
+.masthead__title{
+  font-family:var(--font-display);font-size:clamp(2rem,7vw,2.9rem);
+  font-weight:800;letter-spacing:-.02em;margin:0;line-height:1
+}
+.masthead__title span{color:var(--ink)}
+
+.clock{display:flex;align-items:center;gap:10px}
+.clock__time{
+  font-family:var(--font-data);font-weight:700;
+  font-size:clamp(1.35rem,5vw,1.7rem);font-variant-numeric:tabular-nums;
+  letter-spacing:.02em;min-width:5.4ch;text-align:right;
+  background:var(--card);border:2.5px solid var(--ink);border-radius:10px;
+  padding:4px 10px;box-shadow:var(--lift) rgba(42,27,74,.25)
+}
+.clock__time.is-paused{color:var(--muted)}
+
+/* ---------- Chunky buttons ---------- */
+.btn{
+  background:var(--card);border:2.5px solid var(--ink);border-radius:11px;
+  padding:9px 15px;cursor:pointer;font-size:.86rem;font-weight:700;
+  touch-action:manipulation;box-shadow:var(--lift) rgba(42,27,74,.28);
+  transition:transform .08s ease,box-shadow .08s ease,background .14s ease
+}
+.btn:hover{background:#FBF8FF}
+.btn:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(42,27,74,.28)}
+.btn[disabled]{opacity:.34;cursor:not-allowed;transform:none;box-shadow:0 1px 0 rgba(42,27,74,.2)}
+.btn--wide{width:100%}
+.btn--go{background:var(--c4);color:#fff}
+.btn--go:hover{background:#48B457}
+.btn.is-on{background:var(--c8);color:#fff}
+
+/* ---------- Difficulty ---------- */
+.levels{display:flex;gap:7px}
+.levels__btn{
+  flex:1;background:var(--card);border:2.5px solid var(--ink);border-radius:11px;
+  padding:8px 14px;cursor:pointer;font-family:var(--font-data);font-weight:700;
+  font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
+  touch-action:manipulation;box-shadow:var(--lift) rgba(42,27,74,.28);
+  transition:transform .08s ease,box-shadow .08s ease,background .14s ease
+}
+.levels__btn:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(42,27,74,.28)}
+.levels__btn[data-level="easy"][aria-checked="true"]{background:var(--c5);color:#fff}
+.levels__btn[data-level="medium"][aria-checked="true"]{background:var(--c2);color:#fff}
+.levels__btn[data-level="hard"][aria-checked="true"]{background:var(--c1);color:#fff}
+
+/* ---------- Stage ---------- */
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start}
+.play{display:flex;flex-direction:column;gap:14px;min-width:0}
+
+/* ---------- Board ---------- */
+.board-frame{position:relative;width:min(100%,540px);margin:0 auto}
+.board{
+  display:grid;grid-template-columns:repeat(9,1fr);aspect-ratio:1/1;
+  background:var(--card);border:3px solid var(--ink);border-radius:var(--radius);
+  overflow:hidden;box-shadow:0 8px 0 rgba(42,27,74,.22);
+  transition:transform .3s cubic-bezier(.2,1.4,.4,1)
+}
+.board.is-solved{transform:scale(1.015)}
+
+.cell{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  border:0;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  background:var(--card);padding:0;cursor:pointer;overflow:hidden;
+  touch-action:manipulation;transition:background .12s ease;
+  font-family:var(--font-display);font-weight:800;
+  font-size:clamp(1.15rem,4.9vw,1.95rem);line-height:1
+}
+.cell:nth-child(9n){border-right:0}
+.cell:nth-child(n+73){border-bottom:0}
+.cell--vr{border-right:2px solid var(--ink)}
+.cell--hr{border-bottom:2px solid var(--ink)}
+
+.cell__value{position:relative;z-index:2;pointer-events:none;font-variant-numeric:tabular-nums;display:block}
+
+/* your entries wear the digit's color; clues stay in ink */
+.cell--d1 .cell__value{color:var(--c1)} .cell--d2 .cell__value{color:var(--c2)}
+.cell--d3 .cell__value{color:var(--c3)} .cell--d4 .cell__value{color:var(--c4)}
+.cell--d5 .cell__value{color:var(--c5)} .cell--d6 .cell__value{color:var(--c6)}
+.cell--d7 .cell__value{color:var(--c7)} .cell--d8 .cell__value{color:var(--c8)}
+.cell--d9 .cell__value{color:var(--c9)}
+.cell.is-given{cursor:default}
+.cell.is-given .cell__value{color:var(--ink)}
+
+.cell.is-peer{background:var(--peer)}
+.cell.is-match{background:var(--active-soft)}
+.cell.is-selected{background:var(--active-soft);box-shadow:inset 0 0 0 3px var(--active)}
+.cell.is-conflict{background:var(--danger-soft)!important;box-shadow:inset 0 0 0 2.5px var(--danger)}
+.cell.is-conflict .cell__value{color:var(--danger)}
+.cell.is-wrong .cell__value{text-decoration:underline wavy var(--danger);text-underline-offset:4px}
+
+.cell__notes{
+  position:absolute;inset:7%;z-index:1;pointer-events:none;
+  display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)
+}
+.cell__note{
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-weight:700;
+  font-size:clamp(.44rem,1.62vw,.68rem);line-height:1;opacity:.72
+}
+.cell__note:nth-child(1){color:var(--c1)} .cell__note:nth-child(2){color:var(--c2)}
+.cell__note:nth-child(3){color:var(--c3)} .cell__note:nth-child(4){color:var(--c4)}
+.cell__note:nth-child(5){color:var(--c5)} .cell__note:nth-child(6){color:var(--c6)}
+.cell__note:nth-child(7){color:var(--c7)} .cell__note:nth-child(8){color:var(--c8)}
+.cell__note:nth-child(9){color:var(--c9)}
+.cell__note.is-lit{opacity:1;transform:scale(1.28)}
+
+@keyframes pop{0%{transform:scale(.4)}55%{transform:scale(1.22)}100%{transform:scale(1)}}
+.cell__value.pop{animation:pop .26s cubic-bezier(.2,1.5,.4,1)}
+
+/* ---------- Overlays ---------- */
+.overlay{
+  position:absolute;inset:0;z-index:10;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;
+  background:rgba(255,255,255,.95);border:3px solid var(--ink);border-radius:var(--radius)
+}
+.overlay.is-shown{display:flex}
+.overlay__title{font-family:var(--font-display);font-weight:800;font-size:clamp(1.8rem,7vw,2.5rem);margin:0}
+.overlay__title--win{
+  background:linear-gradient(90deg,var(--c1),var(--c2),var(--c4),var(--c6),var(--c8),var(--c9));
+  -webkit-background-clip:text;background-clip:text;color:transparent
+}
+.overlay__meta{font-family:var(--font-data);font-size:.76rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0}
+.overlay__time{font-family:var(--font-data);font-weight:700;font-size:clamp(1.9rem,7vw,2.5rem);font-variant-numeric:tabular-nums;margin:0}
+.board.is-hidden .cell__value,.board.is-hidden .cell__notes{visibility:hidden}
+
+.confetti{position:absolute;inset:0;z-index:9;overflow:hidden;pointer-events:none;border-radius:var(--radius)}
+.confetti i{position:absolute;top:-12%;width:9px;height:14px;border-radius:2px;animation:drop linear forwards}
+@keyframes drop{to{transform:translateY(760px) rotate(760deg);opacity:.15}}
+
+/* ---------- Status ---------- */
+.status{
+  min-height:1.3em;font-family:var(--font-data);font-size:.72rem;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-align:center
+}
+
+/* ---------- Keypad ---------- */
+.pad{width:min(100%,540px);margin:0 auto;display:flex;flex-direction:column;gap:9px}
+.pad__digits{display:grid;grid-template-columns:repeat(9,1fr);gap:6px}
+.digit{
+  position:relative;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;
+  border:2.5px solid var(--ink);border-radius:11px;cursor:pointer;color:#fff;
+  font-family:var(--font-display);font-weight:800;font-size:clamp(1.05rem,4.3vw,1.5rem);
+  box-shadow:var(--lift) rgba(42,27,74,.3);touch-action:manipulation;
+  transition:transform .08s ease,box-shadow .08s ease,filter .14s ease
+}
+.digit:hover{filter:brightness(1.08)}
+.digit:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(42,27,74,.3)}
+.digit[data-digit="1"]{background:var(--c1)} .digit[data-digit="2"]{background:var(--c2)}
+.digit[data-digit="3"]{background:var(--c3)} .digit[data-digit="4"]{background:var(--c4)}
+.digit[data-digit="5"]{background:var(--c5)} .digit[data-digit="6"]{background:var(--c6)}
+.digit[data-digit="7"]{background:var(--c7)} .digit[data-digit="8"]{background:var(--c8)}
+.digit[data-digit="9"]{background:var(--c9)}
+.digit__tally{
+  position:absolute;top:-6px;right:-5px;min-width:17px;height:17px;padding:0 3px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--card);border:2px solid var(--ink);border-radius:9px;
+  font-family:var(--font-data);font-size:.58rem;font-weight:700;color:var(--ink);line-height:1
+}
+.digit.is-lit{transform:translateY(-3px);box-shadow:0 7px 0 rgba(42,27,74,.3)}
+.digit.is-lit:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(42,27,74,.3)}
+.digit.is-done{background:#DDD5EE;color:#A79BC4;box-shadow:0 1px 0 rgba(42,27,74,.2)}
+.digit.is-done .digit__tally{display:none}
+.digit.is-done::after{content:"";position:absolute;left:18%;right:18%;top:50%;height:2.5px;background:#A79BC4;border-radius:2px}
+
+.pad__actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.pad__actions .btn{padding:11px 4px;font-size:.78rem}
+.pad__caption{font-family:var(--font-data);font-size:.62rem;letter-spacing:.06em;color:var(--muted);text-align:center;margin:0}
+
+/* ---------- Rail ---------- */
+.rail{display:flex;flex-direction:column;gap:14px}
+.panel{background:var(--card);border:2.5px solid var(--ink);border-radius:var(--radius);padding:14px;box-shadow:0 5px 0 rgba(42,27,74,.22)}
+.panel__title{
+  font-family:var(--font-data);font-size:.62rem;font-weight:700;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 10px;padding-bottom:7px;border-bottom:2px dotted var(--rule)
+}
+.stack{display:flex;flex-direction:column;gap:9px}
+
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  background:none;border:0;padding:3px 0;cursor:pointer;text-align:left;font-size:.86rem;font-weight:600;touch-action:manipulation}
+.toggle__track{flex:none;width:42px;height:23px;border:2.5px solid var(--ink);border-radius:999px;background:var(--peer);position:relative;transition:background .16s ease}
+.toggle__track::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--ink);transition:transform .16s cubic-bezier(.2,1.4,.4,1)}
+.toggle[aria-pressed="true"] .toggle__track{background:var(--c4)}
+.toggle[aria-pressed="true"] .toggle__track::after{transform:translateX(19px);background:#fff}
+#notesToggle[aria-pressed="true"] .toggle__track{background:var(--c8)}
+
+.stats{margin:0;display:grid;grid-template-columns:1fr auto;gap:7px 12px;font-size:.82rem}
+.stats dt{color:var(--muted);font-weight:600}
+.stats dd{margin:0;font-family:var(--font-data);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+#bestEasy{color:var(--c5)} #bestMedium{color:var(--c2)} #bestHard{color:var(--c1)}
+#statStreak{color:var(--c8)}
+.stats__rule{grid-column:1/-1;height:2px;background:var(--rule);border-radius:2px;margin:3px 0}
+
+.keys{margin:0;font-family:var(--font-data);font-size:.66rem;line-height:1.95;color:var(--muted);display:grid;grid-template-columns:auto 1fr;gap:0 12px}
+.keys dt{color:var(--ink);font-weight:700}
+.keys dd{margin:0}
+
+/* ---------- Coach ---------- */
+.coach{width:min(100%,540px);margin:0 auto;background:var(--card);border:2.5px solid var(--ink);
+  border-radius:var(--radius);box-shadow:0 5px 0 rgba(42,27,74,.22);padding:13px;display:flex;flex-direction:column;gap:9px}
+.coach__head{display:flex;align-items:center;gap:8px}
+.coach__badge{
+  width:26px;height:26px;flex:none;border-radius:50%;border:2.5px solid var(--ink);
+  background:linear-gradient(135deg,var(--c8),var(--c6));
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:.7rem;font-weight:800
+}
+.coach__name{font-family:var(--font-data);font-size:.64rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0;flex:1}
+.coach__mode{font-family:var(--font-data);font-size:.55rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 7px;border-radius:7px;border:2px solid var(--rule);color:var(--muted)}
+.coach__mode.is-online{border-color:var(--c4);color:var(--c4)}
+
+.coach__log{display:flex;flex-direction:column;gap:7px;max-height:210px;overflow-y:auto;padding-right:2px}
+.bubble{max-width:86%;padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;border:2px solid var(--ink)}
+.bubble--coach{align-self:flex-start;background:var(--peer);border-bottom-left-radius:4px}
+.bubble--you{align-self:flex-end;background:var(--c7);color:#fff;border-bottom-right-radius:4px;font-weight:600}
+.bubble--warn{align-self:stretch;max-width:100%;background:#FFF4D6;border-color:var(--c2);font-size:.78rem}
+.bubble--think{align-self:flex-start;background:var(--peer);display:flex;gap:4px;align-items:center}
+.bubble--think i{width:6px;height:6px;border-radius:50%;background:var(--c8);animation:blink 1s infinite}
+.bubble--think i:nth-child(2){animation-delay:.16s}
+.bubble--think i:nth-child(3){animation-delay:.32s}
+@keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+.coach__chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{background:var(--card);border:2px solid var(--rule);border-radius:999px;padding:5px 11px;
+  cursor:pointer;font-size:.72rem;font-weight:600;color:var(--muted);touch-action:manipulation;transition:all .12s ease}
+.chip:hover{border-color:var(--c8);color:var(--c8)}
+
+.coach__form{display:flex;gap:6px}
+.coach__input{flex:1;min-width:0;font:inherit;font-size:.84rem;padding:9px 11px;color:var(--ink);
+  background:var(--card);border:2.5px solid var(--ink);border-radius:11px}
+.coach__input::placeholder{color:var(--muted)}
+.coach__send{flex:none;padding:9px 15px}
+
+.coach__key{display:none;gap:6px;flex-direction:column}
+.coach__key.is-shown{display:flex}
+.coach__note{font-size:.7rem;color:var(--muted);margin:0;line-height:1.5}
+
+/* ---------- Responsive ---------- */
+@media (max-width:820px){
+  .stage{grid-template-columns:1fr;gap:18px}
+  .rail{flex-direction:row;flex-wrap:wrap}
+  .rail .panel{flex:1 1 250px}
+  .panel--keys{display:none}
+}
+@media (max-width:520px){
+  body{padding:10px}
+  .masthead{gap:10px 12px;margin-bottom:14px}
+  .levels{order:3;width:100%}
+  .levels__btn{padding:9px 4px}
+  .rail .panel{flex:1 1 100%}
+  .pad__digits,.pad__actions{gap:4px}
+  .digit{border-radius:9px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+  .digit.is-lit{transform:none;box-shadow:var(--lift) rgba(42,27,74,.3)}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="masthead">
+    <div class="masthead__brand">
+      <p class="masthead__eyebrow">Nine by nine</p>
+      <h1 class="masthead__title" aria-label="Sudoku"><span aria-hidden="true">S</span><span aria-hidden="true">u</span><span aria-hidden="true">d</span><span aria-hidden="true">o</span><span aria-hidden="true">k</span><span aria-hidden="true">u</span></h1>
+    </div>
+
+    <div class="levels" role="radiogroup" aria-label="Difficulty">
+      <button class="levels__btn" type="button" role="radio" aria-checked="true"  data-level="easy">Easy</button>
+      <button class="levels__btn" type="button" role="radio" aria-checked="false" data-level="medium">Medium</button>
+      <button class="levels__btn" type="button" role="radio" aria-checked="false" data-level="hard">Hard</button>
+    </div>
+
+    <div class="clock">
+      <span class="clock__time" id="clock" aria-label="Elapsed time">00:00</span>
+      <button class="btn" type="button" id="pauseBtn">Pause</button>
+    </div>
+  </header>
+
+  <main class="stage">
+
+    <div class="play">
+      <div class="board-frame">
+        <div class="board" id="board" role="grid" aria-label="Sudoku grid"></div>
+        <div class="confetti" id="confetti" aria-hidden="true"></div>
+
+        <div class="overlay" id="pauseOverlay">
+          <h2 class="overlay__title">Paused</h2>
+          <p class="overlay__meta">The clock is stopped</p>
+          <button class="btn btn--go" type="button" data-resume>Resume</button>
+        </div>
+
+        <div class="overlay" id="winOverlay">
+          <h2 class="overlay__title overlay__title--win">Solved!</h2>
+          <p class="overlay__time" id="winTime">00:00</p>
+          <p class="overlay__meta" id="winNote">Easy</p>
+          <button class="btn btn--go" type="button" data-newgame>New puzzle</button>
+        </div>
+      </div>
+
+      <p class="status" id="status" role="status" aria-live="polite">Pick a cell to begin</p>
+
+      <div class="pad">
+        <div class="pad__digits" id="padDigits"></div>
+        <div class="pad__actions">
+          <button class="btn" type="button" id="notesBtn" aria-pressed="false">Notes</button>
+          <button class="btn" type="button" id="eraseBtn">Erase</button>
+          <button class="btn" type="button" id="undoBtn">Undo</button>
+          <button class="btn" type="button" id="redoBtn">Redo</button>
+        </div>
+        <p class="pad__caption">Badges count how many of each digit are still missing</p>
+      </div>
+
+      <section class="coach" id="coach">
+        <div class="coach__head">
+          <span class="coach__badge" aria-hidden="true">?</span>
+          <h2 class="coach__name">Ask the coach</h2>
+          <span class="coach__mode" id="coachMode">Offline</span>
+        </div>
+
+        <div class="coach__log" id="coachLog" role="log" aria-live="polite" aria-label="Coach conversation"></div>
+
+        <div class="coach__chips" id="coachChips">
+          <button class="chip" type="button" data-ask="Why can't a 4 go in this cell?">Why not a 4?</button>
+          <button class="chip" type="button" data-ask="What should I look at next?">What next?</button>
+          <button class="chip" type="button" data-ask="Are my pencil marks here right?">Check my notes</button>
+          <button class="chip" type="button" data-ask="How am I doing so far?">How am I doing?</button>
+        </div>
+
+        <form class="coach__form" id="coachForm">
+          <input class="coach__input" id="coachInput" type="text" autocomplete="off"
+                 placeholder="Ask about the cell you have selected…" aria-label="Question for the coach">
+          <button class="btn coach__send" type="submit" id="coachSend">Ask</button>
+        </form>
+
+        <div class="coach__key" id="coachKey">
+          <input class="coach__input" id="coachKeyInput" type="password" autocomplete="off"
+                 placeholder="sk-ant-…" aria-label="Anthropic API key">
+          <button class="btn" type="button" id="coachKeySave">Save key</button>
+          <p class="coach__note">Stored in this browser only, never sent anywhere but Anthropic. Leave it blank to keep playing with the offline coach.</p>
+        </div>
+      </section>
+    </div>
+
+    <aside class="rail">
+
+      <section class="panel">
+        <h2 class="panel__title">Game</h2>
+        <div class="stack">
+          <button class="btn btn--wide btn--go" type="button" id="newBtn">New puzzle</button>
+          <button class="btn btn--wide" type="button" id="resetBtn">Reset board</button>
+          <button class="toggle" type="button" id="autoCheckBtn" aria-pressed="false">
+            <span>Auto-check</span><span class="toggle__track" aria-hidden="true"></span>
+          </button>
+          <button class="toggle" type="button" id="notesToggle" aria-pressed="false">
+            <span>Pencil marks</span><span class="toggle__track" aria-hidden="true"></span>
+          </button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel__title">Statistics</h2>
+        <dl class="stats">
+          <dt>Best · Easy</dt><dd id="bestEasy">—</dd>
+          <dt>Best · Medium</dt><dd id="bestMedium">—</dd>
+          <dt>Best · Hard</dt><dd id="bestHard">—</dd>
+          <div class="stats__rule"></div>
+          <dt>Games won</dt><dd id="statWon">0</dd>
+          <dt>Current streak</dt><dd id="statStreak">0</dd>
+        </dl>
+      </section>
+
+      <section class="panel panel--keys">
+        <h2 class="panel__title">Keyboard</h2>
+        <dl class="keys">
+          <dt>1–9</dt><dd>Place number</dd>
+          <dt>0 / ⌫</dt><dd>Erase cell</dd>
+          <dt>↑↓←→</dt><dd>Move selection</dd>
+          <dt>N</dt><dd>Pencil marks</dd>
+          <dt>C</dt><dd>Auto-check</dd>
+          <dt>P</dt><dd>Pause</dd>
+          <dt>Ctrl Z</dt><dd>Undo</dd>
+          <dt>Ctrl Y</dt><dd>Redo</dd>
+        </dl>
+      </section>
+
+    </aside>
+  </main>
+</div>
+
+<noscript><p style="text-align:center">This game needs JavaScript turned on.</p></noscript>
+
+<script>
+"use strict";
+/* =====================================================================
+   SUDOKU
+   Vanilla ES6+. No frameworks, no build step, no network calls.
+
+   Sections
+     1. Storage wrapper (degrades gracefully on file:// origins)
+     2. Grid maths helpers
+     3. Solver + generator
+     4. Game state
+     5. History (undo / redo)
+     6. Mutations
+     7. Validation
+     8. Timer
+     9. Statistics
+    10. Rendering
+    11. Input handling
+    12. Game lifecycle
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------
+   1. STORAGE
+   localStorage throws on some file:// origins, so every call is
+   guarded and falls back to an in-memory object for the session.
+   --------------------------------------------------------------- */
+const Store = (() => {
+  let live = false;
+  try {
+    localStorage.setItem("__probe__", "1");
+    localStorage.removeItem("__probe__");
+    live = true;
+  } catch (_) { live = false; }
+
+  const memory = Object.create(null);
+
+  return {
+    read(key, fallback) {
+      try {
+        const raw = live ? localStorage.getItem(key) : memory[key];
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (_) { return fallback; }
+    },
+    write(key, value) {
+      const raw = JSON.stringify(value);
+      try { if (live) localStorage.setItem(key, raw); else memory[key] = raw; }
+      catch (_) { memory[key] = raw; }
+    },
+    remove(key) {
+      try { if (live) localStorage.removeItem(key); else delete memory[key]; }
+      catch (_) { delete memory[key]; }
+    }
+  };
+})();
+
+const KEY_STATS = "sudoku.hue.stats.v1";
+const KEY_GAME  = "sudoku.hue.game.v1";
+
+
+/* ---------------------------------------------------------------
+   2. GRID MATHS
+   Cells are a flat array of 81 entries, index = row * 9 + col.
+   --------------------------------------------------------------- */
+const CELLS = 81;
+const rowOf = i => (i / 9) | 0;
+const colOf = i => i % 9;
+const boxOf = i => ((rowOf(i) / 3) | 0) * 3 + ((colOf(i) / 3) | 0);
+
+/** Peers = every cell sharing a row, column or box (self excluded). */
+const PEERS = (() => {
+  const table = [];
+  for (let i = 0; i < CELLS; i++) {
+    const set = [];
+    for (let j = 0; j < CELLS; j++) {
+      if (j === i) continue;
+      if (rowOf(j) === rowOf(i) || colOf(j) === colOf(i) || boxOf(j) === boxOf(i)) set.push(j);
+    }
+    table.push(set);
+  }
+  return table;
+})();
+
+/** Bit population count for a 9-bit candidate mask. */
+function popcount(mask) {
+  let n = 0;
+  while (mask) { mask &= mask - 1; n++; }
+  return n;
+}
+
+/** Fisher-Yates, in place. */
+function shuffle(list) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
+
+
+/* ---------------------------------------------------------------
+   3. SOLVER + GENERATOR
+   Backtracking driven by bitmasks and a most-constrained-cell
+   heuristic, which keeps uniqueness checks fast enough to run
+   dozens of times per puzzle.
+   --------------------------------------------------------------- */
+
+/** Build row/column/box occupancy masks for a grid. */
+function buildMasks(grid) {
+  const rows = new Int16Array(9), cols = new Int16Array(9), boxes = new Int16Array(9);
+  for (let i = 0; i < CELLS; i++) {
+    const d = grid[i];
+    if (!d) continue;
+    const bit = 1 << (d - 1);
+    rows[rowOf(i)] |= bit; cols[colOf(i)] |= bit; boxes[boxOf(i)] |= bit;
+  }
+  return { rows, cols, boxes };
+}
+
+/**
+ * Count solutions, stopping early once `limit` is reached.
+ * Used to guarantee that a dug-out puzzle still has exactly one answer.
+ */
+function countSolutions(grid, limit = 2) {
+  const { rows, cols, boxes } = buildMasks(grid);
+  let found = 0;
+
+  (function search() {
+    let target = -1, targetMask = 0, fewest = 10;
+
+    for (let i = 0; i < CELLS; i++) {
+      if (grid[i]) continue;
+      const mask = ~(rows[rowOf(i)] | cols[colOf(i)] | boxes[boxOf(i)]) & 0x1FF;
+      const n = popcount(mask);
+      if (n === 0) return;                       // dead end
+      if (n < fewest) { fewest = n; target = i; targetMask = mask; if (n === 1) break; }
+    }
+
+    if (target === -1) { found++; return; }      // grid is full
+
+    const r = rowOf(target), c = colOf(target), b = boxOf(target);
+    for (let d = 1; d <= 9; d++) {
+      const bit = 1 << (d - 1);
+      if (!(targetMask & bit)) continue;
+      grid[target] = d; rows[r] |= bit; cols[c] |= bit; boxes[b] |= bit;
+      search();
+      grid[target] = 0; rows[r] &= ~bit; cols[c] &= ~bit; boxes[b] &= ~bit;
+      if (found >= limit) return;
+    }
+  })();
+
+  return found;
+}
+
+/** Produce a complete, valid, randomly ordered 9x9 solution. */
+function generateSolution() {
+  const grid = new Uint8Array(CELLS);
+  const { rows, cols, boxes } = buildMasks(grid);
+
+  (function fill() {
+    let target = -1, targetMask = 0, fewest = 10;
+
+    for (let i = 0; i < CELLS; i++) {
+      if (grid[i]) continue;
+      const mask = ~(rows[rowOf(i)] | cols[colOf(i)] | boxes[boxOf(i)]) & 0x1FF;
+      const n = popcount(mask);
+      if (n === 0) return false;
+      if (n < fewest) { fewest = n; target = i; targetMask = mask; if (n === 1) break; }
+    }
+
+    if (target === -1) return true;
+
+    const options = [];
+    for (let d = 1; d <= 9; d++) if (targetMask & (1 << (d - 1))) options.push(d);
+    shuffle(options);
+
+    const r = rowOf(target), c = colOf(target), b = boxOf(target);
+    for (const d of options) {
+      const bit = 1 << (d - 1);
+      grid[target] = d; rows[r] |= bit; cols[c] |= bit; boxes[b] |= bit;
+      if (fill()) return true;
+      grid[target] = 0; rows[r] &= ~bit; cols[c] &= ~bit; boxes[b] &= ~bit;
+    }
+    return false;
+  })();
+
+  return grid;
+}
+
+/** Clue counts per tier. Fewer clues means more deduction. */
+const CLUE_TARGET = { easy: 45, medium: 34, hard: 27 };
+
+/**
+ * Carve a puzzle out of a full solution, removing a clue only when the
+ * remaining grid still has exactly one answer.
+ */
+function generatePuzzle(level) {
+  const solution = generateSolution();
+  const puzzle = Uint8Array.from(solution);
+  const target = CLUE_TARGET[level] || CLUE_TARGET.easy;
+
+  let clues = CELLS;
+  const order = shuffle([...Array(CELLS).keys()]);
+
+  for (const i of order) {
+    if (clues <= target) break;
+    const kept = puzzle[i];
+    puzzle[i] = 0;
+    if (countSolutions(Uint8Array.from(puzzle), 2) === 1) clues--;
+    else puzzle[i] = kept;                       // removal was ambiguous, put it back
+  }
+
+  return { puzzle, solution, clues };
+}
+
+
+/* ---------------------------------------------------------------
+   4. GAME STATE
+   `notes` holds a 9-bit mask per cell: bit 0 = pencil mark "1".
+   --------------------------------------------------------------- */
+const state = {
+  level: "easy",
+  puzzle: new Uint8Array(CELLS),
+  solution: new Uint8Array(CELLS),
+  values: new Uint8Array(CELLS),
+  notes: new Uint16Array(CELLS),
+  given: new Uint8Array(CELLS),
+  selected: null,        // index of the focused cell
+  spotlight: null,       // digit highlighted when no cell is selected
+  notesMode: false,
+  autoCheck: false,
+  paused: false,
+  solved: false,
+  touched: false         // has the player entered anything on this puzzle?
+};
+
+
+/* ---------------------------------------------------------------
+   5. HISTORY
+   Each entry is a snapshot of values + notes. Snapshots are tiny
+   (243 bytes) and remove a whole class of undo bugs that delta
+   stacks tend to attract.
+   --------------------------------------------------------------- */
+const HISTORY_MAX = 400;
+let history = [];
+let historyAt = -1;
+
+function snapshot() {
+  return { v: Uint8Array.from(state.values), n: Uint16Array.from(state.notes) };
+}
+
+function historyReset() {
+  history = [snapshot()];
+  historyAt = 0;
+}
+
+function historyPush() {
+  history.length = historyAt + 1;              // drop any redo branch
+  history.push(snapshot());
+  if (history.length > HISTORY_MAX) history.shift();
+  historyAt = history.length - 1;
+}
+
+function historyApply() {
+  const entry = history[historyAt];
+  state.values.set(entry.v);
+  state.notes.set(entry.n);
+}
+
+function undo() {
+  if (state.paused || historyAt <= 0) return;
+  historyAt--;
+  historyApply();
+  afterChange("Undone");
+}
+
+function redo() {
+  if (state.paused || historyAt >= history.length - 1) return;
+  historyAt++;
+  historyApply();
+  afterChange("Redone");
+}
+
+
+/* ---------------------------------------------------------------
+   6. MUTATIONS
+   --------------------------------------------------------------- */
+let popIndex = null;   // cell that just received a number, for the pop animation
+
+/**
+ * Remove digit `d` from the pencil marks of every peer of cell `i`.
+ * Running this on every placement (not only correct ones) keeps notes
+ * tidy without leaking whether the entry was right.
+ */
+function clearPeerNotes(i, d) {
+  const bit = 1 << (d - 1);
+  for (const p of PEERS[i]) state.notes[p] &= ~bit;
+}
+
+function enterDigit(i, d) {
+  if (state.given[i] || state.paused || state.solved) return;
+
+  if (state.notesMode) {
+    state.values[i] = 0;                       // a note replaces any final number
+    state.notes[i] ^= 1 << (d - 1);
+  } else if (state.values[i] === d) {
+    state.values[i] = 0;                       // tapping the same digit clears it
+  } else {
+    state.values[i] = d;
+    state.notes[i] = 0;
+    clearPeerNotes(i, d);
+    popIndex = i;
+  }
+
+  state.touched = true;
+  historyPush();
+  afterChange();
+}
+
+function eraseCell(i) {
+  if (i == null || state.given[i] || state.paused || state.solved) return;
+  if (!state.values[i] && !state.notes[i]) return;
+  state.values[i] = 0;
+  state.notes[i] = 0;
+  historyPush();
+  afterChange("Cell cleared");
+}
+
+function resetBoard() {
+  if (state.paused) return;
+  for (let i = 0; i < CELLS; i++) {
+    if (state.given[i]) continue;
+    state.values[i] = 0;
+    state.notes[i] = 0;
+  }
+  state.solved = false;
+  historyPush();
+  afterChange("Board reset");
+}
+
+/** Shared tail for anything that changes the grid. */
+function afterChange(message) {
+  if (message) say(message);
+  render();
+  checkWin();
+  saveGame();
+}
+
+
+/* ---------------------------------------------------------------
+   7. VALIDATION
+   --------------------------------------------------------------- */
+
+/** Flag every filled cell that duplicates a digit in its row, column or box. */
+function findConflicts() {
+  const bad = new Uint8Array(CELLS);
+  const units = [];
+
+  for (let u = 0; u < 9; u++) {
+    const row = [], col = [], box = [];
+    for (let k = 0; k < 9; k++) {
+      row.push(u * 9 + k);
+      col.push(k * 9 + u);
+      box.push(((u / 3) | 0) * 27 + (u % 3) * 3 + ((k / 3) | 0) * 9 + (k % 3));
+    }
+    units.push(row, col, box);
+  }
+
+  for (const unit of units) {
+    const seen = new Map();
+    for (const i of unit) {
+      const d = state.values[i];
+      if (!d) continue;
+      if (!seen.has(d)) seen.set(d, []);
+      seen.get(d).push(i);
+    }
+    for (const group of seen.values()) {
+      if (group.length > 1) for (const i of group) bad[i] = 1;
+    }
+  }
+  return bad;
+}
+
+function isSolved() {
+  for (let i = 0; i < CELLS; i++) if (state.values[i] !== state.solution[i]) return false;
+  return true;
+}
+
+function checkWin() {
+  if (state.solved || !isSolved()) return;
+
+  state.solved = true;
+  timerStop();
+  Store.remove(KEY_GAME);
+
+  const result = recordWin(state.level, elapsedMs);
+  ui.winTime.textContent = formatTime(elapsedMs);
+  ui.winNote.textContent = result.isBest
+    ? "New best time · " + state.level
+    : capitalise(state.level) + " · streak " + result.streak;
+
+  ui.board.classList.add("is-solved");
+  throwConfetti();
+  setTimeout(() => ui.winOverlay.classList.add("is-shown"), 620);
+
+  say("Solved in " + formatTime(elapsedMs));
+  render();
+  renderStats();
+}
+
+
+/* ---------------------------------------------------------------
+   8. TIMER
+   Driven by wall-clock deltas so a throttled tab cannot drift.
+   --------------------------------------------------------------- */
+let elapsedMs = 0;
+let startedAt = 0;
+let ticker = null;
+
+function timerStart() {
+  if (ticker || state.solved) return;
+  startedAt = Date.now();
+  ticker = setInterval(() => {
+    elapsedMs += Date.now() - startedAt;
+    startedAt = Date.now();
+    renderClock();
+    saveGame();
+  }, 500);
+  renderClock();
+}
+
+function timerStop() {
+  if (!ticker) return;
+  elapsedMs += Date.now() - startedAt;
+  clearInterval(ticker);
+  ticker = null;
+  renderClock();
+}
+
+function timerReset() {
+  timerStop();
+  elapsedMs = 0;
+  renderClock();
+}
+
+function setPaused(paused) {
+  if (state.solved) return;
+  state.paused = paused;
+  if (paused) { timerStop(); } else { timerStart(); }
+  ui.pauseOverlay.classList.toggle("is-shown", paused);
+  ui.board.classList.toggle("is-hidden", paused);
+  ui.pauseBtn.textContent = paused ? "Resume" : "Pause";
+  ui.clock.classList.toggle("is-paused", paused);
+  say(paused ? "Paused" : "Playing");
+}
+
+function formatTime(ms) {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = n => String(n).padStart(2, "0");
+  return h ? h + ":" + pad(m) + ":" + pad(s) : pad(m) + ":" + pad(s);
+}
+
+
+/* ---------------------------------------------------------------
+   9. STATISTICS
+   --------------------------------------------------------------- */
+const DEFAULT_STATS = { best: { easy: null, medium: null, hard: null }, won: 0, streak: 0 };
+
+let stats = Object.assign({}, DEFAULT_STATS, Store.read(KEY_STATS, {}));
+stats.best = Object.assign({ easy: null, medium: null, hard: null }, stats.best || {});
+
+function saveStats() { Store.write(KEY_STATS, stats); }
+
+function recordWin(level, ms) {
+  const previous = stats.best[level];
+  const isBest = previous == null || ms < previous;
+  if (isBest) stats.best[level] = ms;
+  stats.won += 1;
+  stats.streak += 1;
+  saveStats();
+  return { isBest, streak: stats.streak };
+}
+
+/** Walking away from a started puzzle ends the run of consecutive wins. */
+function breakStreak() {
+  if (!state.touched || state.solved || stats.streak === 0) return false;
+  stats.streak = 0;
+  saveStats();
+  return true;
+}
+
+
+/* ---------------------------------------------------------------
+   10. RENDERING
+   --------------------------------------------------------------- */
+const ui = {
+  board:        document.getElementById("board"),
+  padDigits:    document.getElementById("padDigits"),
+  confetti:     document.getElementById("confetti"),
+  clock:        document.getElementById("clock"),
+  status:       document.getElementById("status"),
+  pauseBtn:     document.getElementById("pauseBtn"),
+  pauseOverlay: document.getElementById("pauseOverlay"),
+  winOverlay:   document.getElementById("winOverlay"),
+  winTime:      document.getElementById("winTime"),
+  winNote:      document.getElementById("winNote"),
+  notesBtn:     document.getElementById("notesBtn"),
+  notesToggle:  document.getElementById("notesToggle"),
+  autoCheckBtn: document.getElementById("autoCheckBtn"),
+  eraseBtn:     document.getElementById("eraseBtn"),
+  undoBtn:      document.getElementById("undoBtn"),
+  redoBtn:      document.getElementById("redoBtn"),
+  newBtn:       document.getElementById("newBtn"),
+  resetBtn:     document.getElementById("resetBtn"),
+  bestEasy:     document.getElementById("bestEasy"),
+  bestMedium:   document.getElementById("bestMedium"),
+  bestHard:     document.getElementById("bestHard"),
+  statWon:      document.getElementById("statWon"),
+  statStreak:   document.getElementById("statStreak"),
+  coachLog:     document.getElementById("coachLog"),
+  coachForm:    document.getElementById("coachForm"),
+  coachInput:   document.getElementById("coachInput"),
+  coachSend:    document.getElementById("coachSend"),
+  coachChips:   document.getElementById("coachChips"),
+  coachMode:    document.getElementById("coachMode"),
+  coachKey:     document.getElementById("coachKey"),
+  coachKeyInput:document.getElementById("coachKeyInput"),
+  coachKeySave: document.getElementById("coachKeySave")
+};
+
+const cellEls = [], noteEls = [], valueEls = [], digitEls = [], tallyEls = [];
+
+/** Read the nine digit hues straight from the stylesheet, so CSS stays the
+    single source of truth for color. */
+const css = getComputedStyle(document.documentElement);
+const HUE  = [null];
+const TINT = [null];
+for (let d = 1; d <= 9; d++) {
+  HUE.push(css.getPropertyValue("--c" + d).trim());
+  TINT.push(css.getPropertyValue("--t" + d).trim());
+}
+const INK  = css.getPropertyValue("--ink").trim();
+const PEER = css.getPropertyValue("--peer").trim();
+
+/** Build the 81 cells and the keypad once; later passes only update them. */
+function buildDom() {
+  const grid = document.createDocumentFragment();
+
+  for (let i = 0; i < CELLS; i++) {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "cell";
+    cell.dataset.index = i;
+    cell.setAttribute("role", "gridcell");
+    cell.tabIndex = -1;
+
+    const notes = document.createElement("span");
+    notes.className = "cell__notes";
+    const marks = [];
+    for (let d = 1; d <= 9; d++) {
+      const mark = document.createElement("span");
+      mark.className = "cell__note";
+      notes.appendChild(mark);
+      marks.push(mark);
+    }
+
+    const value = document.createElement("span");
+    value.className = "cell__value";
+
+    cell.append(notes, value);
+    grid.appendChild(cell);
+
+    cellEls.push(cell);
+    noteEls.push(marks);
+    valueEls.push(value);
+  }
+  ui.board.appendChild(grid);
+
+  const pad = document.createDocumentFragment();
+  for (let d = 1; d <= 9; d++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "digit";
+    btn.dataset.digit = d;
+    btn.setAttribute("aria-label", "Place " + d);
+
+    const face = document.createElement("span");
+    face.textContent = d;
+
+    const tally = document.createElement("span");
+    tally.className = "digit__tally";
+
+    btn.append(face, tally);
+    pad.appendChild(btn);
+    digitEls.push(btn);
+    tallyEls.push(tally);
+  }
+  ui.padDigits.appendChild(pad);
+}
+
+function render() {
+  const sel = state.selected;
+  const active = (sel != null && state.values[sel]) ? state.values[sel] : state.spotlight;
+  const conflicts = findConflicts();
+  const remaining = new Array(10).fill(9);
+
+  // tint the whole board with whichever digit you are working on
+  const root = document.documentElement.style;
+  root.setProperty("--active", active ? HUE[active] : INK);
+  root.setProperty("--active-soft", active ? TINT[active] : PEER);
+
+  for (let i = 0; i < CELLS; i++) {
+    const value = state.values[i];
+    if (value) remaining[value]--;
+
+    const classes = ["cell"];
+    if (colOf(i) === 2 || colOf(i) === 5) classes.push("cell--vr");
+    if (rowOf(i) === 2 || rowOf(i) === 5) classes.push("cell--hr");
+    if (state.given[i]) classes.push("is-given");
+    if (value) classes.push("cell--d" + value);
+
+    if (sel != null) {
+      if (i === sel) classes.push("is-selected");
+      else if (rowOf(i) === rowOf(sel) || colOf(i) === colOf(sel) || boxOf(i) === boxOf(sel)) classes.push("is-peer");
+    }
+    if (active && value === active) classes.push("is-match");
+    if (conflicts[i]) classes.push("is-conflict");
+    if (state.autoCheck && value && value !== state.solution[i]) classes.push("is-wrong");
+
+    const cell = cellEls[i];
+    cell.className = classes.join(" ");
+    cell.tabIndex = (i === sel) ? 0 : -1;
+    valueEls[i].textContent = value || "";
+
+    const mask = value ? 0 : state.notes[i];
+    for (let d = 1; d <= 9; d++) {
+      const mark = noteEls[i][d - 1];
+      const on = (mask & (1 << (d - 1))) !== 0;
+      mark.textContent = on ? d : "";
+      mark.classList.toggle("is-lit", on && active === d);
+    }
+
+    cell.setAttribute("aria-label",
+      "Row " + (rowOf(i) + 1) + ", column " + (colOf(i) + 1) + ", " +
+      (value ? (state.given[i] ? "clue " : "") + value : "empty"));
+  }
+
+  for (let d = 1; d <= 9; d++) {
+    const left = remaining[d];
+    tallyEls[d - 1].textContent = left > 0 ? left : "";
+    digitEls[d - 1].classList.toggle("is-done", left <= 0);
+    digitEls[d - 1].classList.toggle("is-lit", active === d);
+  }
+
+  ui.undoBtn.disabled = historyAt <= 0;
+  ui.redoBtn.disabled = historyAt >= history.length - 1;
+
+  // replay the pop animation on a freshly placed number
+  if (popIndex != null) {
+    const el = valueEls[popIndex];
+    el.classList.remove("pop");
+    void el.offsetWidth;                        // force reflow so it restarts
+    el.classList.add("pop");
+    popIndex = null;
+  }
+}
+
+function renderClock() { ui.clock.textContent = formatTime(elapsedMs); }
+
+function renderStats() {
+  ui.bestEasy.textContent   = stats.best.easy   != null ? formatTime(stats.best.easy)   : "—";
+  ui.bestMedium.textContent = stats.best.medium != null ? formatTime(stats.best.medium) : "—";
+  ui.bestHard.textContent   = stats.best.hard   != null ? formatTime(stats.best.hard)   : "—";
+  ui.statWon.textContent    = stats.won;
+  ui.statStreak.textContent = stats.streak;
+}
+
+function renderModes() {
+  ui.notesBtn.classList.toggle("is-on", state.notesMode);
+  ui.notesBtn.setAttribute("aria-pressed", String(state.notesMode));
+  ui.notesToggle.setAttribute("aria-pressed", String(state.notesMode));
+  ui.autoCheckBtn.setAttribute("aria-pressed", String(state.autoCheck));
+}
+
+function renderLevels() {
+  document.querySelectorAll(".levels__btn").forEach(btn => {
+    btn.setAttribute("aria-checked", String(btn.dataset.level === state.level));
+  });
+}
+
+/** A short burst of paper in the nine digit colors. */
+function throwConfetti() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  ui.confetti.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (let n = 0; n < 46; n++) {
+    const bit = document.createElement("i");
+    bit.style.left = (Math.random() * 100).toFixed(1) + "%";
+    bit.style.background = HUE[1 + ((Math.random() * 9) | 0)];
+    bit.style.animationDuration = (1.3 + Math.random() * 1.3).toFixed(2) + "s";
+    bit.style.animationDelay = (Math.random() * 0.35).toFixed(2) + "s";
+    frag.appendChild(bit);
+  }
+  ui.confetti.appendChild(frag);
+  setTimeout(() => { ui.confetti.textContent = ""; }, 3200);
+}
+
+function say(message) { ui.status.textContent = message; }
+function capitalise(word) { return word.charAt(0).toUpperCase() + word.slice(1); }
+
+
+/* ---------------------------------------------------------------
+   11. INPUT
+   --------------------------------------------------------------- */
+function selectCell(i, focus) {
+  state.selected = i;
+  state.spotlight = null;
+  render();
+  if (focus && i != null) cellEls[i].focus({ preventScroll: true });
+}
+
+function handleDigit(d) {
+  if (state.paused || state.solved) return;
+  const i = state.selected;
+  if (i == null || state.given[i]) {
+    state.spotlight = state.spotlight === d ? null : d;   // scan mode
+    render();
+    return;
+  }
+  enterDigit(i, d);
+}
+
+function moveSelection(dr, dc) {
+  const from = state.selected == null ? 40 : state.selected;
+  const r = Math.min(8, Math.max(0, rowOf(from) + dr));
+  const c = Math.min(8, Math.max(0, colOf(from) + dc));
+  selectCell(r * 9 + c, true);
+}
+
+function toggleNotes() {
+  state.notesMode = !state.notesMode;
+  renderModes();
+  say(state.notesMode ? "Pencil marks on" : "Final numbers");
+}
+
+function toggleAutoCheck() {
+  state.autoCheck = !state.autoCheck;
+  renderModes();
+  render();
+  say(state.autoCheck ? "Auto-check on" : "Auto-check off");
+}
+
+/* Board clicks */
+ui.board.addEventListener("click", event => {
+  const cell = event.target.closest(".cell");
+  if (!cell || state.paused || state.solved) return;
+  selectCell(Number(cell.dataset.index), false);
+});
+
+/* Keypad */
+ui.padDigits.addEventListener("click", event => {
+  const btn = event.target.closest(".digit");
+  if (btn) handleDigit(Number(btn.dataset.digit));
+});
+
+/* Controls */
+ui.notesBtn.addEventListener("click", toggleNotes);
+ui.notesToggle.addEventListener("click", toggleNotes);
+ui.autoCheckBtn.addEventListener("click", toggleAutoCheck);
+ui.eraseBtn.addEventListener("click", () => eraseCell(state.selected));
+ui.undoBtn.addEventListener("click", undo);
+ui.redoBtn.addEventListener("click", redo);
+ui.resetBtn.addEventListener("click", resetBoard);
+ui.newBtn.addEventListener("click", () => startGame(state.level));
+ui.pauseBtn.addEventListener("click", () => setPaused(!state.paused));
+
+document.querySelectorAll("[data-resume]").forEach(el => el.addEventListener("click", () => setPaused(false)));
+document.querySelectorAll("[data-newgame]").forEach(el => el.addEventListener("click", () => startGame(state.level)));
+document.querySelectorAll(".levels__btn").forEach(btn => {
+  btn.addEventListener("click", () => startGame(btn.dataset.level));
+});
+
+/* Keyboard */
+document.addEventListener("keydown", event => {
+  const key = event.key;
+  const mod = event.ctrlKey || event.metaKey;
+
+  if (mod && key.toLowerCase() === "z") {
+    event.preventDefault();
+    event.shiftKey ? redo() : undo();
+    return;
+  }
+  if (mod && key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
+  if (mod) return;
+
+  if (key >= "1" && key <= "9") { event.preventDefault(); handleDigit(Number(key)); return; }
+  if (key === "0" || key === "Backspace" || key === "Delete") { event.preventDefault(); eraseCell(state.selected); return; }
+
+  switch (key) {
+    case "ArrowUp":    event.preventDefault(); moveSelection(-1, 0); break;
+    case "ArrowDown":  event.preventDefault(); moveSelection(1, 0);  break;
+    case "ArrowLeft":  event.preventDefault(); moveSelection(0, -1); break;
+    case "ArrowRight": event.preventDefault(); moveSelection(0, 1);  break;
+    case "n": case "N": toggleNotes(); break;
+    case "c": case "C": toggleAutoCheck(); break;
+    case "p": case "P": setPaused(!state.paused); break;
+    case "Escape":      selectCell(null, false); break;
+  }
+});
+
+/* Pause automatically when the tab is hidden, so the clock stays honest. */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && !state.paused && !state.solved) setPaused(true);
+});
+
+
+/* ---------------------------------------------------------------
+   12. GAME LIFECYCLE
+   --------------------------------------------------------------- */
+function loadPuzzle(level, puzzle, solution, values, notes, ms) {
+  state.level = level;
+  state.puzzle.set(puzzle);
+  state.solution.set(solution);
+  state.values.set(values || puzzle);
+  state.notes.set(notes || new Uint16Array(CELLS));
+  for (let i = 0; i < CELLS; i++) state.given[i] = puzzle[i] ? 1 : 0;
+
+  state.selected = null;
+  state.spotlight = null;
+  state.solved = false;
+  state.paused = false;
+  state.touched = false;
+  for (let i = 0; i < CELLS; i++) {
+    if (!state.given[i] && (state.values[i] || state.notes[i])) { state.touched = true; break; }
+  }
+
+  historyReset();
+  timerReset();
+  elapsedMs = ms || 0;
+  popIndex = null;
+
+  ui.winOverlay.classList.remove("is-shown");
+  ui.pauseOverlay.classList.remove("is-shown");
+  ui.board.classList.remove("is-hidden", "is-solved");
+  ui.confetti.textContent = "";
+  ui.pauseBtn.textContent = "Pause";
+  ui.clock.classList.remove("is-paused");
+
+  if (typeof coachGreet === "function") coachGreet();
+  renderLevels();
+  renderModes();
+  renderStats();
+  render();
+  renderClock();
+  timerStart();
+}
+
+function startGame(level) {
+  if (breakStreak()) say("Streak reset · dealing a new grid");
+  else say("Dealing a new " + level + " grid");
+
+  renderStats();
+
+  // Yield one frame so the status line paints before the solver runs.
+  requestAnimationFrame(() => {
+    const { puzzle, solution, clues } = generatePuzzle(level);
+    loadPuzzle(level, puzzle, solution, puzzle, null, 0);
+    say(capitalise(level) + " · " + clues + " clues");
+    saveGame();
+  });
+}
+
+function saveGame() {
+  if (state.solved) return;
+  Store.write(KEY_GAME, {
+    level: state.level,
+    puzzle: Array.from(state.puzzle),
+    solution: Array.from(state.solution),
+    values: Array.from(state.values),
+    notes: Array.from(state.notes),
+    elapsed: elapsedMs
+  });
+}
+
+function restoreGame() {
+  const saved = Store.read(KEY_GAME, null);
+  if (!saved || !Array.isArray(saved.puzzle) || saved.puzzle.length !== CELLS) return false;
+  try {
+    loadPuzzle(saved.level, saved.puzzle, saved.solution, saved.values, saved.notes, saved.elapsed || 0);
+    setPaused(true);
+    say("Game in progress · press resume");
+    return true;
+  } catch (_) { return false; }
+}
+
+
+/* ---------------------------------------------------------------
+   13. THE COACH
+
+   Division of labour, and it matters: the SOLVER decides what is
+   true about the grid, and the language model only puts it into
+   words. A model reasoning unaided over a Sudoku board will invent
+   confident nonsense, so every fact it is allowed to state is
+   computed here first and handed over as ground truth.
+
+   The solution is deliberately never sent. Everything below is
+   derivable from what the player can already see, so the coach
+   cannot spoil the puzzle even if asked to.
+   --------------------------------------------------------------- */
+const KEY_APIKEY = "sudoku.hue.key.v1";
+const MODEL = "claude-sonnet-4-6";
+
+let coachOnline = false;          // has a live API call ever succeeded?
+let coachBusy = false;
+let coachWarned = false;
+const coachHistory = [];          // raw turns, without the board context
+
+const nameOf = i => "R" + (rowOf(i) + 1) + "C" + (colOf(i) + 1);
+
+/** Digits that could legally go in cell `i` given the current board. */
+function candidatesOf(i) {
+  if (state.values[i]) return [];
+  const used = new Set();
+  for (const p of PEERS[i]) if (state.values[p]) used.add(state.values[p]);
+  const out = [];
+  for (let d = 1; d <= 9; d++) if (!used.has(d)) out.push(d);
+  return out;
+}
+
+/** Which peers already hold digit `d`, split by the unit they share. */
+function blockersOf(i, d) {
+  const hits = { row: [], column: [], box: [] };
+  for (const p of PEERS[i]) {
+    if (state.values[p] !== d) continue;
+    if (rowOf(p) === rowOf(i)) hits.row.push(nameOf(p));
+    else if (colOf(p) === colOf(i)) hits.column.push(nameOf(p));
+    else hits.box.push(nameOf(p));
+  }
+  return hits;
+}
+
+function blockerSentence(i, d) {
+  const h = blockersOf(i, d);
+  const parts = [];
+  if (h.row.length)    parts.push("row (" + h.row.join(", ") + ")");
+  if (h.column.length) parts.push("column (" + h.column.join(", ") + ")");
+  if (h.box.length)    parts.push("box (" + h.box.join(", ") + ")");
+  return parts.join(" and ");
+}
+
+/** Every cell index belonging to each of the 27 units, with a label. */
+function allUnits() {
+  const units = [];
+  for (let u = 0; u < 9; u++) {
+    const row = [], col = [], box = [];
+    for (let k = 0; k < 9; k++) {
+      row.push(u * 9 + k);
+      col.push(k * 9 + u);
+      box.push(((u / 3) | 0) * 27 + (u % 3) * 3 + ((k / 3) | 0) * 9 + (k % 3));
+    }
+    units.push({ cells: row, label: "row " + (u + 1) });
+    units.push({ cells: col, label: "column " + (u + 1) });
+    units.push({ cells: box, label: "box " + (u + 1) });
+  }
+  return units;
+}
+
+/**
+ * The easiest genuinely available next move: a cell with only one
+ * candidate left, or a digit with only one home left in some unit.
+ */
+function findNextStep() {
+  for (let i = 0; i < CELLS; i++) {
+    if (state.values[i]) continue;
+    const c = candidatesOf(i);
+    if (c.length === 1) {
+      return { index: i, digit: c[0], technique: "naked single",
+               reason: nameOf(i) + " has only one candidate left, " + c[0] + ", because every other digit already appears in its " + "row, column or box" };
+    }
+  }
+  for (const unit of allUnits()) {
+    for (let d = 1; d <= 9; d++) {
+      const homes = unit.cells.filter(i => !state.values[i] && candidatesOf(i).includes(d));
+      if (homes.length === 1 && !unit.cells.some(i => state.values[i] === d)) {
+        return { index: homes[0], digit: d, technique: "hidden single",
+                 reason: nameOf(homes[0]) + " is the only cell in " + unit.label + " that can still take a " + d };
+      }
+    }
+  }
+  return null;
+}
+
+/** Compact, verified description of the board for the model. */
+function buildFacts() {
+  const lines = [];
+  let filled = 0;
+  for (let i = 0; i < CELLS; i++) if (state.values[i]) filled++;
+
+  lines.push("Difficulty: " + state.level + ". " + filled + " of 81 cells filled.");
+
+  const rows = [];
+  for (let r = 0; r < 9; r++) {
+    let line = "";
+    for (let c = 0; c < 9; c++) {
+      const v = state.values[r * 9 + c];
+      line += (v ? v : ".") + (c === 2 || c === 5 ? " " : "");
+    }
+    rows.push("  " + line.trim());
+  }
+  lines.push("Board (row 1 at top, '.' = empty):", ...rows);
+
+  const i = state.selected;
+  if (i == null) {
+    lines.push("No cell is selected right now.");
+  } else if (state.values[i]) {
+    lines.push("Selected cell " + nameOf(i) + " already holds " + state.values[i] +
+               (state.given[i] ? " and is a starting clue, so it cannot be changed." : " and was entered by the player."));
+  } else {
+    const cands = candidatesOf(i);
+    lines.push("Selected cell: " + nameOf(i) + ", empty.");
+    lines.push("Digits still possible there: " + (cands.length ? cands.join(", ") : "none, the grid has a contradiction"));
+    const blocked = [];
+    for (let d = 1; d <= 9; d++) {
+      if (cands.includes(d)) continue;
+      blocked.push("  " + d + " is blocked by its " + blockerSentence(i, d));
+    }
+    if (blocked.length) lines.push("Why the others are ruled out:", ...blocked);
+
+    const marks = [];
+    for (let d = 1; d <= 9; d++) if (state.notes[i] & (1 << (d - 1))) marks.push(d);
+    if (marks.length) {
+      const wrong = marks.filter(d => !cands.includes(d));
+      const missing = cands.filter(d => !marks.includes(d));
+      lines.push("Player's pencil marks here: " + marks.join(", ") +
+        (wrong.length ? ". These are impossible: " + wrong.join(", ") : "") +
+        (missing.length ? ". These are possible but not marked: " + missing.join(", ") : "") +
+        (!wrong.length && !missing.length ? ". These are exactly correct." : ""));
+    }
+  }
+
+  const step = findNextStep();
+  lines.push(step
+    ? "An available next move (mention only if the player asks what to do next): " + step.reason + " — that is a " + step.technique + "."
+    : "No naked or hidden single is available; the player needs a harder technique or has made an error.");
+
+  const conflicts = findConflicts();
+  const clashes = [];
+  for (let k = 0; k < CELLS; k++) if (conflicts[k]) clashes.push(nameOf(k));
+  if (clashes.length) lines.push("Cells currently duplicating a digit in a unit: " + clashes.join(", ") + ".");
+
+  if (state.autoCheck) {
+    let wrong = 0;
+    for (let k = 0; k < CELLS; k++) if (state.values[k] && state.values[k] !== state.solution[k]) wrong++;
+    lines.push("Auto-check is on. The player has " + wrong + " entered digit(s) that will not lead to the solution.");
+  }
+
+  lines.push("Elapsed time: " + formatTime(elapsedMs) + ".");
+  return lines.join("\n");
+}
+
+const COACH_SYSTEM =
+  "You are a Sudoku coach built into a game. The player is mid-puzzle.\n\n" +
+  "Every message includes a FACTS block computed by the game's own solver. Those facts are " +
+  "verified and complete. Treat them as the only thing you know about the board: never " +
+  "re-derive, re-check or contradict them, and never state anything about the grid that is " +
+  "not in them. If the facts do not settle the question, say plainly what you cannot tell " +
+  "from them.\n\n" +
+  "You are not given the finished solution and must not pretend to know it. Do not guess a " +
+  "digit for a cell unless the facts name it as an available move.\n\n" +
+  "Teach rather than rescue. Prefer pointing at the region and the reasoning over handing " +
+  "over an answer, unless the player clearly asks to be told. Refer to cells as R4C7 and " +
+  "name techniques in plain words (\"the only cell in this box that can take a 6\").\n\n" +
+  "Reply in at most three short sentences, conversational, no lists, no markdown headings.";
+
+/* ---------- transport ---------- */
+
+function apiKey() { return Store.read(KEY_APIKEY, "") || ""; }
+
+/**
+ * Talk to the Anthropic API. Works with no key when the page is served
+ * as a Claude artifact; otherwise the player supplies their own key.
+ */
+async function callClaude(question) {
+  const headers = { "Content-Type": "application/json" };
+  const key = apiKey();
+  if (key) {
+    headers["x-api-key"] = key;
+    headers["anthropic-version"] = "2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+
+  const messages = coachHistory.slice(-6).concat([{
+    role: "user",
+    content: "FACTS (from the game's solver, all verified):\n" + buildFacts() +
+             "\n\nPlayer asks: " + question
+  }]);
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: MODEL, max_tokens: 1000, system: COACH_SYSTEM, messages })
+  });
+
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const data = await res.json();
+  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+  if (!text) throw new Error("empty reply");
+  return text;
+}
+
+/* ---------- offline answers ---------- */
+
+/**
+ * The same facts, phrased by rules instead of by a model. This is what
+ * runs with no network, and it is never wrong, only blunter.
+ */
+function localAnswer(question) {
+  const q = question.toLowerCase();
+  const i = state.selected;
+  const digit = (q.match(/\b([1-9])\b/) || [])[1];
+
+  if (/next|what.*do|stuck|hint|where/.test(q)) {
+    const step = findNextStep();
+    return step ? step.reason + " (" + step.technique + ")."
+                : "No single-step move is available. Look for a pair of cells in one unit that share the same two candidates, or check for a mistake.";
+  }
+
+  if (/how am i|doing|progress/.test(q)) {
+    let filled = 0;
+    for (let k = 0; k < CELLS; k++) if (state.values[k]) filled++;
+    const conflicts = findConflicts();
+    let clash = 0;
+    for (let k = 0; k < CELLS; k++) if (conflicts[k]) clash++;
+    return filled + " of 81 cells filled in " + formatTime(elapsedMs) + "." +
+           (clash ? " " + clash + " cells clash with another in the same row, column or box." : " Nothing clashes so far.");
+  }
+
+  if (i == null) return "Select a cell first, then ask again.";
+  if (state.values[i]) return nameOf(i) + " already holds " + state.values[i] + ".";
+
+  const cands = candidatesOf(i);
+
+  if (/note|mark|pencil/.test(q)) {
+    const marks = [];
+    for (let d = 1; d <= 9; d++) if (state.notes[i] & (1 << (d - 1))) marks.push(d);
+    if (!marks.length) return "No pencil marks in " + nameOf(i) + ". The possible digits there are " + cands.join(", ") + ".";
+    const wrong = marks.filter(d => !cands.includes(d));
+    const missing = cands.filter(d => !marks.includes(d));
+    if (!wrong.length && !missing.length) return "Your marks in " + nameOf(i) + " are exactly right.";
+    return (wrong.length ? "These cannot go in " + nameOf(i) + ": " + wrong.join(", ") + ". " : "") +
+           (missing.length ? "You are missing " + missing.join(", ") + "." : "");
+  }
+
+  if (digit) {
+    const d = Number(digit);
+    if (cands.includes(d)) return d + " is still possible in " + nameOf(i) + ". Candidates there: " + cands.join(", ") + ".";
+    return d + " cannot go in " + nameOf(i) + " because one is already in its " + blockerSentence(i, d) + ".";
+  }
+
+  return nameOf(i) + " can still take " + (cands.length ? cands.join(", ") : "nothing, so something earlier is wrong") + ".";
+}
+
+/* ---------- coach UI ---------- */
+
+function bubble(kind, text) {
+  const el = document.createElement("div");
+  el.className = "bubble bubble--" + kind;
+  el.textContent = text;
+  ui.coachLog.appendChild(el);
+  ui.coachLog.scrollTop = ui.coachLog.scrollHeight;
+  return el;
+}
+
+function thinking() {
+  const el = document.createElement("div");
+  el.className = "bubble bubble--think";
+  el.innerHTML = "<i></i><i></i><i></i>";
+  ui.coachLog.appendChild(el);
+  ui.coachLog.scrollTop = ui.coachLog.scrollHeight;
+  return el;
+}
+
+async function askCoach(question) {
+  if (coachBusy || !question.trim()) return;
+  coachBusy = true;
+  ui.coachSend.disabled = true;
+  bubble("you", question);
+  const wait = thinking();
+
+  let reply, viaModel = false;
+  try {
+    reply = await callClaude(question);
+    viaModel = true;
+    coachOnline = true;
+  } catch (err) {
+    reply = localAnswer(question);
+  }
+
+  wait.remove();
+  bubble("coach", reply);
+  coachHistory.push({ role: "user", content: question }, { role: "assistant", content: reply });
+
+  if (!viaModel && !coachWarned) {
+    coachWarned = true;
+    bubble("warn", "That answer came from the built-in rules, not from Claude. To get conversational answers, add an Anthropic API key below.");
+    ui.coachKey.classList.add("is-shown");
+  }
+
+  if (viaModel) ui.coachKey.classList.remove("is-shown");
+  ui.coachMode.textContent = coachOnline ? "Claude" : "Offline";
+  ui.coachMode.classList.toggle("is-online", coachOnline);
+  coachBusy = false;
+  ui.coachSend.disabled = false;
+  ui.coachInput.focus();
+}
+
+ui.coachForm.addEventListener("submit", event => {
+  event.preventDefault();
+  const q = ui.coachInput.value;
+  ui.coachInput.value = "";
+  askCoach(q);
+});
+
+ui.coachChips.addEventListener("click", event => {
+  const chip = event.target.closest(".chip");
+  if (chip) askCoach(chip.dataset.ask);
+});
+
+ui.coachKeySave.addEventListener("click", () => {
+  const key = ui.coachKeyInput.value.trim();
+  if (key) Store.write(KEY_APIKEY, key); else Store.remove(KEY_APIKEY);
+  ui.coachKeyInput.value = "";
+  ui.coachKey.classList.remove("is-shown");
+  bubble("coach", key ? "Key saved. Ask me anything about the board." : "Key cleared, back to the built-in rules.");
+});
+
+/* Keep typing in the coach box out of the game's keyboard shortcuts. */
+["coachInput", "coachKeyInput"].forEach(id => {
+  document.getElementById(id).addEventListener("keydown", e => e.stopPropagation());
+});
+
+function coachGreet() {
+  ui.coachLog.textContent = "";
+  coachHistory.length = 0;
+  bubble("coach", "Select a cell and ask why a digit will not fit, or ask what to look at next. I explain the reasoning rather than filling it in for you.");
+}
+
+/* Boot */
+buildDom();
+renderStats();
+coachGreet();
+if (!restoreGame()) startGame("easy");
+</script>
+</body>
+</html>
